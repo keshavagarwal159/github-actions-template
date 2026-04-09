@@ -51,11 +51,13 @@ jobs:
           name: build-artifacts
           path: target/
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ap-south-1
 
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
@@ -63,5 +65,35 @@ jobs:
           context: .
           push: true
           tags: |
-            keshavagarwal159/kubeprojectapp:${{ github.run_number }}
-            keshavagarwal159/kubeprojectapp:latest
+            980637429038.dkr.ecr.ap-south-1.amazonaws.com/team2-demo-app:${{ github.run_number }}
+            980637429038.dkr.ecr.ap-south-1.amazonaws.com/team2-demo-app:latest
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: docker
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: menifest.yml
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Update kubeconfig for EKS
+        run: aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME }} --region ap-south-1
+
+      - name: Update image tag in manifest
+        run: |
+          sed -i 's|team2-demo-app:.*|team2-demo-app:${{ github.run_number }}|' menifest.yml
+
+      - name: Deploy to Kubernetes
+        run: kubectl apply -f menifest.yml
+
+      - name: Verify Deployment
+        run: kubectl rollout status deployment/kubeproject -n keshav --timeout=120s
